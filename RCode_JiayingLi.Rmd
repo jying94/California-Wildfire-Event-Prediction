@@ -1,0 +1,1665 @@
+---
+output: html_document
+editor_options: 
+  chunk_output_type: inline
+---
+
+```{r, message = FALSE}
+library(dplyr)
+library(purrr) 
+library(ggplot2)
+library(xts)
+library(ggfortify)
+library(ggthemes)
+library(maps)
+library(mapdata)
+library(leaflet)
+library(mapproj)
+
+library(sf)
+library(mapview)
+```
+
+Section 1a: EDA of weather station
+#Import Weather Station Metadata 
+```{r}
+weather_stations <- list.files("./weather-hrly/") 
+weather_stations <- substr(weather_stations, start = 1, stop = 3)
+
+network_filename = "./data-final/CA_ASOS_network.csv" 
+network = read.csv(network_filename) 
+network <- network[network$stid %in% weather_stations,] 
+
+
+```
+
+
+```{r}
+fi<-list.files("./weather-hrly/",full.names=T)
+dat<-lapply(fi,read.csv)
+```
+
+#Time range of all weather station data
+```{r}
+
+timerange_ws = data.frame(matrix(nrow = 62, ncol = 3))
+colnames(timerange_ws) = c("start","end","station")
+for (i in c(1:62)) {
+  tempdata = data.frame(dat[i])
+  timelist_early = substr(tempdata$Timestamp[1], start = 1, stop = 4)
+  timelist_final = substr(tempdata$Timestamp[length(tempdata$Timestamp)], start = 1, stop = 4)
+  timerange_ws$start[i] = as.numeric(timelist_early)
+  timerange_ws$end[i] = as.numeric(timelist_final)
+  timerange_ws$station[i] = weather_stations[i]
+}
+timerange_ws
+#all data points starts from 2010, so we will remove all the wildfire events before 2000
+```
+
+Section 1b: EDA of fire
+
+```{r} 
+fires <- read.csv("./data-final/ca_wildfires.csv")
+#keep only fire events happened after 2000
+fires <- fires[which(fires$FIRE_YEAR >= 2000),]
+```
+
+```{r}
+#drop the unuseful columns in fires
+library(dplyr)
+fires <- select(fires, -c(FOD_ID, FPA_ID, SOURCE_SYSTEM_TYPE, SOURCE_SYSTEM, NWCG_REPORTING_AGENCY, LOCAL_FIRE_REPORT_ID, LOCAL_INCIDENT_ID, FIRE_CODE,FIRE_NAME,ICS_209_INCIDENT_NUMBER, MTBS_ID))
+summary(fires)
+```
+
+
+
+```{r}
+pop_data <- read.csv("./data-final/ca_population_density.csv")
+```
+
+#DEFG fires are big firs
+#ABC fires are small fires
+```{r}
+fires_big <- fires[which(fires$FIRE_SIZE_CLASS=="G" | fires$FIRE_SIZE_CLASS=="F" | fires$FIRE_SIZE_CLASS=="E"| fires$FIRE_SIZE_CLASS=="D"),]
+fires_small <- fires[which(fires$FIRE_SIZE_CLASS=="A" | fires$FIRE_SIZE_CLASS=="B"),]
+```
+
+
+
+#Visualize average burn time by county 
+```{r}
+county_map <- map_data('county', 'california') 
+
+fires_big %>%
+    filter(region == 'california') %>%
+    group_by(region, subregion = tolower(FIPS_NAME)) %>%
+    summarize(mean_burn_time = mean(BURN_TIME, na.rm = TRUE)) %>%
+    right_join(county_map, by = c('region', 'subregion')) %>%
+    ggplot(aes(x = long, y = lat, group = group, fill = mean_burn_time)) + 
+    geom_polygon() + 
+    geom_path(color = 'white', size = 0.1) + 
+    scale_fill_continuous(low = "lightgrey", 
+                          high = "darkred",
+                          name = 'Burn time (days)') + 
+    theme_map() + 
+    coord_map('albers', lat0=30, lat1=40) + 
+    ggtitle("Average Burn Time of CA Wildfires by County 2000-2015") + 
+    theme(plot.title = element_text(hjust = 0.5))
+
+```
+
+```{r}
+county_map <- map_data('county', 'california') 
+
+b <- fires_big %>%
+    filter(region == 'california') %>%
+    group_by(region, subregion = tolower(FIPS_NAME)) %>%
+    summarize(mean_burn_time = mean(BURN_TIME, na.rm = TRUE)) %>%
+    right_join(county_map, by = c('region', 'subregion'))
+b
+```
+
+```{r}
+mean_burntime <- g
+```
+
+
+#Visualize the total frequency of events by county 
+
+```{r}
+county_map <- map_data('county', 'california') 
+
+fires_big %>%
+    filter(region == 'california') %>%
+    group_by(region, subregion = tolower(FIPS_NAME)) %>%
+    count(vars = FIPS_NAME) %>%
+    right_join(county_map, by = c('region', 'subregion')) %>%
+    ggplot(aes(x = long, y = lat, group = group, fill = n)) + 
+    geom_polygon() + 
+    geom_path(color = 'white', size = 0.1) + 
+    scale_fill_continuous(low = "lightgrey", 
+                          high = "darkred",
+                          name = '# of Wildfires') + 
+    theme_map() + 
+    coord_map('albers', lat0=30, lat1=40) + 
+    ggtitle("Frequency of CA Wildfires by County 2000-2015") + 
+    theme(plot.title = element_text(hjust = 0.5))
+
+```
+
+
+```{r}
+
+```
+
+
+```{r}
+
+fires_pop = fires_big[!is.na(fires$FIPS_NAME),]
+#fires_county_count <- count(fires_pop[which(fires_pop$FIRE_YEAR=="2011"),], vars = FIPS_NAME)
+fires_county_count <- count(fires_pop, vars = FIPS_NAME)
+
+fires_county_count$vars <- tolower(fires_county_count$vars)
+
+merged_fire_pop = merge(fires_county_count, pop_data, by.x = "vars", by.y = "county")
+
+b <- b[!duplicated(b[,c('subregion')]),]
+b <- b[,c("subregion","mean_burn_time")]
+
+merged_fire_pop = merge(merged_fire_pop, b, by.x = "vars", by.y = "subregion")
+
+
+merged_fire_pop$pop_density <- as.numeric(merged_fire_pop$pop_density)
+
+```
+```{r}
+b
+```
+
+
+```{r}
+
+ggplot(data = merged_fire_pop, aes (x = n, y = pop_density)) + geom_point(alpha = 0.2, col = "navy") + labs(x = "Wildfire Frequency", y="Population Density")
+ggplot(data = merged_fire_pop, aes (x = n, y = mean_burn_time)) + geom_point(alpha = 0.2, col = "navy") + labs(x = "Wildfire Frequency", y = "Mean Burn Time in Days")
+ggplot(data = merged_fire_pop, aes (x = pop_density, y = mean_burn_time)) + geom_point(alpha = 0.2, col = "navy") + labs (x = "Popula")
+
+cor(merged_fire_pop$n, merged_fire_pop$pop_density, use = "complete.obs")
+cor(merged_fire_pop$n, merged_fire_pop$mean_burn_time, use = "complete.obs")
+cor(merged_fire_pop$pop_density, merged_fire_pop$mean_burn_time, use = "complete.obs")
+
+
+```
+```{r}
+#croped_data = merged_fire_pop[which(merged_fire_pop$mean_burn_time<=40),]
+#croped_data = croped_data[which(croped_data$n<=40),]
+
+croped_data = merged_fire_pop[!is.na(merged_fire_pop$mean_burn_time),]
+croped_data = croped_data[!is.na(merged_fire_pop$pop_density),]
+croped_data = croped_data[!is.na(merged_fire_pop$n),]
+
+
+lm_n_den = lm(croped_data$mean_burn_time~croped_data$pop_density+croped_data$n)
+summary(lm_n_den)
+```
+
+
+
+#All fires has stronger correlation comparing to only big fires
+```{r}
+county_map <- map_data('county', 'california') 
+
+b <- fires %>%
+    filter(region == 'california') %>%
+    group_by(region, subregion = tolower(FIPS_NAME)) %>%
+    summarize(mean_burn_time = mean(BURN_TIME, na.rm = TRUE)) %>%
+    right_join(county_map, by = c('region', 'subregion'))
+b
+```
+
+
+```{r}
+
+fires_pop = fires[!is.na(fires$FIPS_NAME),]
+#fires_county_count <- count(fires_pop[which(fires_pop$FIRE_YEAR=="2011"),], vars = FIPS_NAME)
+fires_county_count <- count(fires_pop, vars = FIPS_NAME)
+
+fires_county_count$vars <- tolower(fires_county_count$vars)
+
+merged_fire_pop = merge(fires_county_count, pop_data, by.x = "vars", by.y = "county")
+
+b <- b[!duplicated(b[,c('subregion')]),]
+b <- b[,c("subregion","mean_burn_time")]
+
+merged_fire_pop = merge(merged_fire_pop, b, by.x = "vars", by.y = "subregion")
+
+
+merged_fire_pop$pop_density <- as.numeric(merged_fire_pop$pop_density)
+
+```
+
+
+
+```{r}
+
+ggplot(data = merged_fire_pop, aes (x = n, y = pop_density)) + geom_point(alpha = 0.2, col = "navy") 
+ggplot(data = merged_fire_pop, aes (x = n, y = mean_burn_time)) + geom_point(alpha = 0.2, col = "navy") 
+ggplot(data = merged_fire_pop, aes (x = pop_density, y = mean_burn_time)) + geom_point(alpha = 0.2, col = "navy") 
+
+cor(merged_fire_pop$n, merged_fire_pop$pop_density, use = "complete.obs")
+cor(merged_fire_pop$n, merged_fire_pop$mean_burn_time, use = "complete.obs")
+cor(merged_fire_pop$pop_density, merged_fire_pop$mean_burn_time, use = "complete.obs")
+
+
+
+```
+
+
+
+
+
+```{r}
+#croped_data = merged_fire_pop[which(merged_fire_pop$mean_burn_time<=40),]
+#croped_data = croped_data[which(croped_data$n<=40),]
+
+croped_data = merged_fire_pop[!is.na(merged_fire_pop$mean_burn_time),]
+croped_data = croped_data[!is.na(merged_fire_pop$pop_density),]
+croped_data = croped_data[!is.na(merged_fire_pop$n),]
+
+
+lm_n_den = lm(croped_data$mean_burn_time~croped_data$pop_density+croped_data$n)
+summary(lm_n_den)
+```
+#No significant correlation between all the variables (n, pop_den, mean_burn_time)
+
+
+
+
+
+
+
+
+
+#Correlation of Misc and Equipment & Light
+```{r}
+county_map <- map_data('county', 'california') 
+
+c <- fires[which(fires$STAT_CAUSE_DESCR=="EquipmentUse")] %>%
+    filter(region == 'california') %>%
+    group_by(region, subregion = tolower(FIPS_NAME)) %>%
+    summarize(mean_burn_time = mean(BURN_TIME, na.rm = TRUE)) %>%
+    right_join(county_map, by = c('region', 'subregion'))
+c
+```
+
+```{r}
+
+fires_pop = fires[!is.na(fires$FIPS_NAME),]
+#fires_county_count <- count(fires_pop[which(fires_pop$FIRE_YEAR=="2011"),], vars = FIPS_NAME)
+fires_county_count <- count(fires_pop, vars = FIPS_NAME)
+
+fires_county_count$vars <- tolower(fires_county_count$vars)
+
+merged_fire_pop = merge(fires_county_count, pop_data, by.x = "vars", by.y = "county")
+
+c <- c[!duplicated(c[,c('subregion')]),]
+c <- c[,c("subregion","mean_burn_time")]
+
+merged_fire_pop = merge(merged_fire_pop, b, by.x = "vars", by.y = "subregion")
+
+
+merged_fire_pop$pop_density <- as.numeric(merged_fire_pop$pop_density)
+
+```
+
+
+
+```{r}
+
+ggplot(data = merged_fire_pop, aes (x = n, y = pop_density)) + geom_point(alpha = 0.5, col = "navy") 
+ggplot(data = merged_fire_pop, aes (x = n, y = mean_burn_time)) + geom_point(alpha = 0.5, col = "navy") 
+ggplot(data = merged_fire_pop, aes (x = pop_density, y = mean_burn_time)) + geom_point(alpha = 0.5, col = "navy") 
+
+cor(merged_fire_pop$n, merged_fire_pop$pop_density, use = "complete.obs")
+cor(merged_fire_pop$n, merged_fire_pop$mean_burn_time, use = "complete.obs")
+cor(merged_fire_pop$pop_density, merged_fire_pop$mean_burn_time, use = "complete.obs")
+
+
+
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+Look at spatial density of wildfires (from 2010) and proximity of corresponding weather stations
+
+```{r} 
+fires_filtered = filter(fires, FIRE_YEAR == "2010") 
+
+leaflet(network) %>%
+  addTiles() %>% 
+  addCircleMarkers(
+    lat = fires_filtered$LATITUDE, 
+    lng = fires_filtered$LONGITUDE, 
+    radius = 5, 
+    color = "red", 
+    stroke = FALSE, 
+    fillOpacity = 0.05
+  ) %>% 
+  addCircleMarkers(
+    lat = network$lat, 
+    lng = network$lon, 
+    radius = 4, 
+    color = "navy", 
+    label = ~paste(stid, " - ", station_name),  
+    stroke = FALSE, 
+    fillOpacity = 0.8
+  ) 
+  
+```
+
+
+#plot all fire size classes in a year
+```{r}
+ggplot(data=fires, aes(DISCOVERY_DOY)) + geom_density(aes(col= FIRE_SIZE_CLASS)) + labs(x = "Discovery Day of the Year", col = "Fire Size Class")
+
+```
+
+```{r}
+ggplot(data=fires, aes(FIRE_YEAR)) + geom_bar(aes(fill= FIRE_SIZE_CLASS))
+
+```
+
+```{r} 
+fires_filtered = filter(fires, FIRE_YEAR >= 2000) 
+
+leaflet(network) %>%
+  addTiles() %>% 
+  addCircleMarkers(
+    lat = fires_filtered$LATITUDE, 
+    lng = fires_filtered$LONGITUDE, 
+    radius = 5, 
+    color = "red", 
+    stroke = FALSE, 
+    fillOpacity = 0.02
+  ) %>% 
+  addCircleMarkers(
+    lat = network$lat, 
+    lng = network$lon, 
+    radius = 4, 
+    color = "navy", 
+    label = ~paste(stid, " - ", station_name),  
+    stroke = FALSE, 
+    fillOpacity = 0.8
+  ) 
+  
+```
+
+
+
+```{r} 
+fires_filtered = filter(fires, FIRE_SIZE_CLASS == "G" | FIRE_SIZE_CLASS == "F" | FIRE_SIZE_CLASS == "E" | FIRE_SIZE_CLASS == "D") 
+
+leaflet(network) %>%
+  addTiles() %>% 
+  addCircleMarkers(
+    lat = fires_filtered$LATITUDE, 
+    lng = fires_filtered$LONGITUDE, 
+    radius = 5, 
+    color = "red", 
+    stroke = FALSE, 
+    fillOpacity = 0.05
+  ) %>% 
+  addCircleMarkers(
+    lat = network$lat, 
+    lng = network$lon, 
+    radius = 4, 
+    color = "navy", 
+    label = ~paste(stid, " - ", station_name),  
+    stroke = FALSE, 
+    fillOpacity = 0.8
+  ) 
+  
+```
+
+
+#Weather station close to dense FG level wildfire events
+```{r}
+#selected by visualizing the map
+list_FG = c("SDB","3A6","PMD","MWS","WHP","RAL","SBD","F70","L35","PSP","BFL","CIC","O54","RDD","UKI","BLU","SJC","BAN","FAT")
+list_FG_num <- vector(mode = "list", length = length(list_FG))
+i=1
+n=1
+
+for (x in list_FG) {
+  for(y in weather_stations) {
+    if (x == y) {
+      list_FG_num[i] = n
+    }
+    n = n+1
+  } 
+  n = 1
+  i=i+1
+}
+
+i=1
+n=1
+for (x in list_FG_num) {
+  if (timerange_ws$start[x]==2000 & timerange_ws$end[x]==2015) {
+    assign(list_FG[i],data.frame(dat[unlist(list_FG_num[i])]))
+    n = n+1
+  } else {
+    list_FG[i] <- "NULL"
+  }
+  i = i+1
+}
+list_FG_20002015 = list_FG[list_FG!="NULL"]
+
+list_FG_20002015 <- list_FG_20002015[!list_FG_20002015 %in% c("WHP", "MWS")]
+
+```
+
+#fires in rank D,E,F,G
+```{r}
+
+network_FG <- network[network$stid %in% list_FG_20002015,] 
+network_FG
+
+
+leaflet(network_FG) %>%
+  addTiles() %>% 
+  addCircleMarkers(
+    lat = fires_big$LATITUDE, 
+    lng = fires_big$LONGITUDE, 
+    radius = 5, 
+    color = "red", 
+    stroke = FALSE, 
+    fillOpacity = 0.05
+  ) %>% 
+  addCircleMarkers(
+    lat = network_FG$lat, 
+    lng = network_FG$lon, 
+    radius = 4, 
+    color = "navy", 
+    label = ~paste(stid, " - ", station_name),  
+    stroke = FALSE, 
+    fillOpacity = 0.8
+  ) 
+```
+
+
+```{r}
+
+network_FG <- network[network$stid %in% list_FG_20002015,] 
+network_FG
+
+
+leaflet(network_FG) %>%
+  addTiles() %>% 
+  addCircleMarkers(
+    lat = fires_filtered$LATITUDE, 
+    lng = fires_filtered$LONGITUDE, 
+    radius = 5, 
+    color = "red", 
+    stroke = FALSE, 
+    fillOpacity = 0.05
+  ) %>% 
+  addCircleMarkers(
+    lat = network_FG$lat, 
+    lng = network_FG$lon, 
+    radius = 4, 
+    color = "navy", 
+    label = ~paste(stid, " - ", station_name),  
+    stroke = FALSE, 
+    fillOpacity = 0.8
+  ) 
+```
+
+```{r}
+ggplot(data=fires_big, aes(DISCOVERY_DOY)) + geom_density(aes(col= FIRE_SIZE_CLASS))
+#remove one outlier
+
+```
+
+
+
+
+```{r}
+fires_filtered_G_CLASS = fires_filtered_G_CLASS
+
+ggplot(data=fires_filtered_G_CLASS, aes(x=fires_filtered_G_CLASS$STAT_CAUSE_DESCR, y=DISCOVERY_DOY)) + 
+  geom_point(aes(size=fires_filtered_G_CLASS$FIRE_SIZE, col = fires_filtered_G_CLASS$BURN_TIME)) +scale_color_gradient(low="white", high="red")
+```
+
+
+
+```{r}
+
+# Select a subset of the data to work with (it doesn't make sense to try to see all 189,000 fires at once)
+#fires_subset = fires[1:20,] # first 20
+#fires_b = fires[which(fires$FIRE_SIZE_CLASS == 'G'),] # big class "G" fires_subset
+
+# Convert to sf data type for spatial analysis
+#locations_fires = st_as_sf(fires_subset, coords = c("LONGITUDE", "LATITUDE"), crs = 4326)
+locations_bigfires = st_as_sf(fires_filtered_G_CLASS, coords = c("LONGITUDE", "LATITUDE"), crs = 4326)
+
+# View on map
+#mapview(locations_fires) # just look at the data
+#mapview(locations_fires, zcol = "FIRE_SIZE", legend = TRUE) # zcol allows you to select different variables to highlight
+mapview(locations_bigfires,zcol = "STAT_CAUSE_DESCR", legend = TRUE) 
+
+
+```
+
+
+
+#Weather data analysis for the selected weather stations
+```{r}
+#station valid, tmpf, dwpf. relh, drct, sknt, p01i, gust, wxcodes
+#All data in network_FG contain 2000-2015 hrly datapoints 140256 = 365*16*24 + 4*24
+# in this section, we will combine the hrly data to daily data - data cleaning 
+
+#list of new dt
+dt_list_new <- vector(mode = "list", length = length(network_FG))
+count = 1
+
+for (x in network_FG$stid) {
+  temp_dt = get(x)
+  temp_dt_new = data.frame(matrix(nrow = 140256/24, ncol = 2))
+  colnames(temp_dt_new) = c("Weatherstation","Datestamp")
+  temp_dt_new$Weatherstation = x
+  temp_dt_new$Datestamp = unique(substr(temp_dt$Timestamp, start = 1, stop = 10))
+  temp_dt$Datestamp = substr(temp_dt$Timestamp, start = 1, stop = 10)
+  temp_result_tmpf = temp_dt%>%
+      group_by(Datestamp)%>%
+      summarize(new_tmpf = mean(tmpf_avg, na.rm=TRUE), 
+                new_dwpf = mean(dwpf_avg, na.rm=TRUE), 
+                new_relh = mean(relh_avg, na.rm=TRUE), 
+                new_sped = mean(sped_avg, na.rm=TRUE), 
+                new_p01i = mean(p01i_tot, na.rm=TRUE), 
+                new_alti = mean(alti_avg, na.rm=TRUE), 
+                new_drct = mean(drct_avg, na.rm=TRUE))
+
+    temp_dt_new$tmpf_avg = temp_result_tmpf$new_tmpf
+    temp_dt_new$dwpf_avg = temp_result_tmpf$new_dwpf
+    temp_dt_new$relh_avg = temp_result_tmpf$new_relh
+    temp_dt_new$sped_avg = temp_result_tmpf$new_sped
+    temp_dt_new$p01i_tot = temp_result_tmpf$new_p01i
+      temp_dt_new$p01i_tot[is.nan(temp_dt_new$p01i_tot)] <- 0
+    temp_dt_new$alti_avg = temp_result_tmpf$new_alti
+    temp_dt_new$drct_avg = temp_result_tmpf$new_drct
+    temp_dt_new$daynum = c(1:length(temp_dt_new$Weatherstation))
+    
+  new_dt_name = paste(toString(x), "new", sep = "")
+  assign(new_dt_name,temp_dt_new)
+  #temp_dt = temp_dt[!is.na(temp_dt$tmpf_avg),]
+  dt_list_new[count] <- new_dt_name
+  count = count+1  
+ # plot_temp = ggplot(data = temp_dt, aes(wxcodes)) + geom_bar()
+  #print(plot_temp)
+}
+
+# all weather stations' data has been cleaned at this point
+
+```
+
+```{r}
+for (dt_name in dt_list_new) {
+  dt_temp <- get(dt_name)
+  print(dt_name)
+  plot_temp = ggplot(data = dt_temp, aes(x = Datestamp, y = tmpf_avg)) + geom_point()
+  print(plot_temp)
+}
+
+
+
+```
+
+
+
+
+```{r}
+
+leaflet(network_FG) %>%
+  addTiles() %>% 
+  addCircleMarkers(
+    lat = fires_big$LATITUDE, 
+    lng = fires_big$LONGITUDE, 
+    radius = 5, 
+    color = "red", 
+    stroke = FALSE, 
+    fillOpacity = 0.05
+  ) %>% 
+  addCircleMarkers(
+    lat = network_FG$lat, 
+    lng = network_FG$lon, 
+    radius = 4, 
+    color = "navy", 
+    label = ~paste(stid, " - ", station_name),  
+    stroke = FALSE, 
+    fillOpacity = 0.8
+  ) 
+```
+
+
+
+#Match the wildfire in 100 km close to the weather station 
+
+```{r}
+
+  # Specify the source of X and Y coordinates
+  target <- data.frame(matrix(nrow = length(fires_big$LONGITUDE), ncol = 2))
+  colnames(target) <- c("longitude", "latitude")
+  target$longitude <- fires_big$LONGITUDE
+  target$latitude <- fires_big$LATITUDE
+  
+  
+  target_sf <- st_as_sf(target, coords = c("longitude", "latitude"))
+  # Set the projection to EPSG 4326 (long-lat)
+  st_crs(target_sf) <- 4326
+  
+  fire_big_withcoor <-fires_big
+
+
+list_stations = network_FG$stid
+i=1
+for (x in list_stations) {
+  lat_point = network_FG$lat[i]
+  lon_point = network_FG$lon[i]
+ 
+  pointSEE <- data_frame(mylat = lat_point, mylon = lon_point) 
+  # Specify the source of X and Y coordinates
+  point_sfSEE <- st_as_sf(pointSEE, coords = c("mylon", "mylat"))
+  # Set the projection to EPSG 4326 (long-lat)
+  st_crs(point_sfSEE) <- 4326
+  
+  # Calculate the distance
+  target_sf2 <- target_sf %>%
+    mutate(Dist = as.numeric(st_distance(point_sfSEE, target_sf, by_element = TRUE))) 
+  fire_big_withcoor[,paste0("Dist",x)] <- target_sf2$Dist
+  
+  
+  i=i+1
+}
+
+```
+
+#Remove all values larger than 100km and keep the lowest one
+
+```{r}
+fire_big_withcoor
+dt_use <-fire_big_withcoor
+
+```
+
+```{r}
+dt_use$dist_keep<-apply(dt_use[,c(41:51)],1, FUN = min)
+
+dt_usesub <- dt_use[,c(41:51)]
+
+dt_use$closestWS<-colnames(dt_usesub)[apply(dt_usesub,1,which.min)]
+dt_use$closestWS<-substr(dt_use$closestWS,start=5, stop = 7)
+
+dt_use_100k <- subset(dt_use, dist_keep <= 100000)
+```
+
+```{r}
+
+leaflet(network_FG) %>%
+  addTiles() %>% 
+  addCircleMarkers(
+    lat = dt_use_100k$LATITUDE, 
+    lng = dt_use_100k$LONGITUDE, 
+    radius = 5, 
+    color = "red", 
+    stroke = FALSE, 
+    fillOpacity = 0.05
+  ) %>% 
+  addCircleMarkers(
+    lat = network_FG$lat, 
+    lng = network_FG$lon, 
+    radius = 4, 
+    color = "navy", 
+    label = ~paste(stid, " - ", station_name),  
+    stroke = FALSE, 
+    fillOpacity = 0.8
+  ) 
+```
+
+
+
+#Merge the fire data with the weather data
+
+```{r}
+
+#Create a new column with the cleaned date of fire event
+dt_use_100k$Date_Clean <-  as.Date(dt_use_100k$DISCOVERY_DOY-1, origin = paste(dt_use_100k$FIRE_YEAR,"-01-01", sep = ""))
+dt_use_100k$Date_Clean <- as.character(dt_use_100k$Date_Clean)
+
+
+pre_merge_dt_use_100k <- dt_use_100k[,c("STAT_CAUSE_CODE", "STAT_CAUSE_DESCR","FIRE_SIZE", "FIRE_SIZE_CLASS", "LATITUDE", "LONGITUDE", "dist_keep","closestWS", "Date_Clean","OBJECTID")]
+
+```
+
+```{r}
+#Assign all the fire event with weather data
+
+fireY_bind <- data.frame()
+fireN_bind <- data.frame()
+
+for (x in list_stations) {
+  
+  dt_temp = get(paste(x,"new",sep = ""))
+  dt_temp_fireXstation = pre_merge_dt_use_100k[which(pre_merge_dt_use_100k$closestWS==x),]
+  
+ fireY_temp<-merge(dt_temp,dt_temp_fireXstation, by.x = "Datestamp",  by.y = "Date_Clean")
+ fireN_temp<-dt_temp[! dt_temp$Datestamp %in% fireY_temp$Datestamp, ]
+
+  fireY_bind <-rbind(fireY_temp, fireY_bind)
+  fireN_bind <-rbind(fireN_temp, fireN_bind)
+}
+
+```
+
+```{r}
+
+fireY_bind$firesYN <- as.factor(1)
+fireN_bind$firesYN <- as.factor(0)
+
+```
+
+
+```{r}
+fireY_bind$month <- substr(fireY_bind$Datestamp,start = 6,stop = 7)
+fireN_bind$month <- substr(fireN_bind$Datestamp,start = 6,stop = 7)
+```
+
+```{r}
+ggplot(data = fireY_bind, aes(month)) + geom_bar(aes(fill = fireY_bind$STAT_CAUSE_DESCR), col = "black",alpha = 0.5) + labs(fill="Wildfire Causes")
+```
+
+
+
+
+
+```{r}
+fireN_bind$OBJECTID <- 0
+list_col_no <- colnames(fireN_bind)
+
+fireY_bind_clean <- fireY_bind[,list_col_no]
+fireN_bind_clean <- fireN_bind
+
+
+```
+
+```{r}
+fireY_bind_Lightning <- subset(fireY_bind, STAT_CAUSE_DESCR=="Lightning")
+fireY_bind_EQU <- subset(fireY_bind, STAT_CAUSE_DESCR=="Equipment Use")
+fireY_bind_Arson <- subset(fireY_bind, STAT_CAUSE_DESCR=="Arson")
+
+
+fireY_bind_Lightning <- fireY_bind_Lightning[,list_col_no]
+fireY_bind_EQU <- fireY_bind_EQU[,list_col_no]
+fireY_bind_Arson <- fireY_bind_Arson[,list_col_no]
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+```{r}
+library(corrplot)
+corrplot(res, type = "upper", order = "hclust", 
+         tl.col = "black", tl.srt = 45)
+```
+
+```{r}
+trail = test_CIC_1[which(test_CIC_1$daynum<3820+365),]
+ggplot(data = trail, aes(Datestamp)) + geom_histogram(aes(col = firesYN), stat= "count")
+```
+
+```{r}
+pairs(~dwpf_avg+relh_avg+sped_avg+p01i_tot+alti_avg+drct_avg,data=dt_ML_fire_YN_down)
+
+```
+
+
+
+```{r}
+pairs(~dwpf_avg+relh_avg+sped_avg+p01i_tot+alti_avg+drct_avg,data=dt_ML_fire_YN_down)
+
+```
+
+
+```{r}  
+
+ggplot(data = fireY_bind, aes (tmpf_avg)) + geom_density(aes(col=fireY_bind$STAT_CAUSE_DESCR))
+ggplot(data = fireY_bind, aes(STAT_CAUSE_DESCR)) + geom_bar(aes(fill = fireY_bind$FIRE_SIZE_CLASS), alpha = 0.5, col = "black")+theme(axis.text.x=element_text(angle=90,hjust=1,vjust=0.5)) + labs(fill = "Fire Size Class")
+```
+
+
+
+```{r}
+ggplot(data = dt_ML_fire_YN_down, aes (tmpf_avg)) + geom_density(aes(col = firesYN))
+ggplot(data = dt_ML_fire_YN_down, aes (relh_avg)) + geom_density(aes(col = firesYN))
+ggplot(data = dt_ML_fire_YN_down, aes (sped_avg)) + geom_density(aes(col = firesYN))
+ggplot(data = dt_ML_fire_YN_down, aes (p01i_tot)) + geom_density(aes(col = firesYN))+xlim(0,0.05)
+ggplot(data = dt_ML_fire_YN_down, aes (alti_avg)) + geom_density(aes(col = firesYN))
+ggplot(data = dt_ML_fire_YN_down, aes (drct_avg)) + geom_density(aes(col = firesYN))
+
+```
+
+
+```{r}
+boxplot(dt_ML_fire_YN_down$alti_avg~dt_ML_fire_YN_down$firesYN, ylab = "Pressure Altimerter in Inches")
+boxplot(dt_ML_fire_YN_down$tmpf_avg~dt_ML_fire_YN_down$firesYN, ylab = "Temperature in Fahrenheit")
+boxplot(dt_ML_fire_YN_down$relh_avg~dt_ML_fire_YN_down$firesYN)
+boxplot(dt_ML_fire_YN_down$sped_avg~dt_ML_fire_YN_down$firesYN)
+boxplot(dt_ML_fire_YN_down$p01i_tot~dt_ML_fire_YN_down$firesYN)
+boxplot(dt_ML_fire_YN_down$drct_avg~dt_ML_fire_YN_down$firesYN, ylab = "Wind Direction in Degrees from North")
+
+
+```
+
+
+
+```{r}
+ggplot(data = dt_ML_fire_YN_down,aes(x = dt_ML_fire_YN_down$sped_avg, y = relh_avg))+ geom_point(aes(col = firesYN), alpha = 0.1)
+ggplot(data = dt_ML_fire_YN_down,aes(x = (dt_ML_fire_YN_down$alti_avg), y = relh_avg))+ geom_point(aes(col = firesYN), alpha = 0.1) + xlim(30.5-1,30.5)
+
+
+```
+
+
+
+```{r}
+ggplot(data = dt_ML_fire_YN_down, aes (x=relh_avg, tmpf_avg)) + geom_point(aes(col = firesYN), alpha = 0.1)+ labs(x = "Relative Humidity", y = "Temperature", col = "Wildfire")
+ggplot(data = dt_ML_fire_YN_down, aes (x=relh_avg, y=sped_avg)) + geom_point(aes(col = firesYN), alpha = 0.1) + labs(x = "Relative Humidity", y = "Wind Speed", col = "Wildfire")
+ggplot(data = dt_ML_fire_YN_down, aes (x=relh_avg, y=alti_avg)) + geom_point(aes(col = firesYN), alpha = 0.1) + ylim(29.5,30.5)
+ggplot(data = dt_ML_fire_YN_down, aes (x=relh_avg, y=drct_avg)) + geom_point(aes(col = firesYN), alpha = 0.1) 
+
+
+ggplot(data = dt_ML_fire_YN_down, aes (x=sped_avg, tmpf_avg)) + geom_point(aes(col = firesYN), alpha = 0.1) 
+ggplot(data = dt_ML_fire_YN_down, aes (x=sped_avg, y=alti_avg)) + geom_point(aes(col = firesYN), alpha = 0.1) + ylim(29.5,30.5)
+ggplot(data = dt_ML_fire_YN_down, aes (x=sped_avg, y=drct_avg)) + geom_point(aes(col = firesYN), alpha = 0.1)
+
+
+ggplot(data = dt_ML_fire_YN_down, aes (x=tmpf_avg, y=alti_avg)) + geom_point(aes(col = firesYN), alpha = 0.1)+labs(x="Temperature", y ="Pressure Altimeter", col = "Wildfire")
+ggplot(data = dt_ML_fire_YN_down, aes (x=tmpf_avg, y=drct_avg)) + geom_point(aes(col = firesYN), alpha = 0.1)+labs(x="Temperature", y ="Wind Direction", col = "Wildfire")
+
+ggplot(data = dt_ML_fire_YN_down, aes (x=drct_avg, y=alti_avg)) + geom_point(aes(col = firesYN), alpha = 0.1) + ylim(29.5, 30.5)
+
+
+#ggplot(data - dt_ML_fire_YN_down,aes(x = log(p01i_tot), y = relh_avg))+ geom_point(aes(col = firesYN), alpha = 0.1)
+
+```
+
+
+#Not Used
+```{r}
+ggplot(data = fireY_bind, aes (tmpf_avg)) + geom_density(aes(col = fireY_bind$STAT_CAUSE_DESCR))
+ggplot(data = fireY_bind, aes (relh_avg)) + geom_density(aes(col = fireY_bind$STAT_CAUSE_DESCR))
+
+ggplot(data = fireY_bind, aes (fireY_bind$dwpf_avg)) + geom_density(aes(col = fireY_bind$STAT_CAUSE_DESCR))
+ggplot(data = fireY_bind, aes (fireY_bind$sped_avg)) + geom_density(aes(col = fireY_bind$STAT_CAUSE_DESCR))
+ggplot(data = fireY_bind, aes (fireY_bind$p01i_tot)) + geom_density(aes(col = fireY_bind$STAT_CAUSE_DESCR))+xlim(0,0.03)
+ggplot(data = fireY_bind, aes (fireY_bind$alti_avg)) + geom_density(aes(col = fireY_bind$STAT_CAUSE_DESCR))
+
+```
+
+
+
+```{r}
+EqpU = fireY_bind[which(fireY_bind$STAT_CAUSE_DESCR=="Equipment Use"),]
+
+
+EqpU = rbind(EqpU[,list_col_no], fireN_bind)      
+
+EqpU_new <- na.omit(EqpU)
+col_name_EqpU <- colnames(EqpU)
+
+
+EqpU_new = data.frame(downSample(dt_ML_fire_YN,dt_ML_fire_YN$firesYN,list=TRUE,yname="firesYN")[1])
+colnames(EqpU_new)<-col_name_EqpU
+
+ggplot(data = EqpU_new, aes(x = EqpU_new$tmpf_avg,y = relh_avg)) + geom_point(aes(col = EqpU_new$firesYN), alpha = 0.1) + labs(x = "Average Hourly Temperature", y ="Average Hourly Humidity", col = "Wildfire Event") 
+ggplot(data = EqpU_new, aes(x = EqpU_new$tmpf_avg,y = EqpU_new$sped_avg)) + geom_point(aes(col = EqpU_new$firesYN), alpha = 0.1) + labs(x = "Average Hourly Temperature", y ="Average Hourly Humidity", col = "Wildfire Event") 
+ggplot(data = EqpU_new, aes(x = EqpU_new$tmpf_avg,y = EqpU_new$drct_avg)) + geom_point(aes(col = EqpU_new$firesYN), alpha = 0.1) + labs(x = "Average Hourly Temperature", y ="Average Hourly Humidity", col = "Wildfire Event") 
+ggplot(data = EqpU_new, aes(x = EqpU_new$tmpf_avg,y = log(EqpU_new$p01i_tot))) + geom_point(aes(col = EqpU_new$firesYN), alpha = 0.2) + labs(x = "Average Hourly Temperature", y ="Average Hourly Humidity", col = "Wildfire Event") 
+ggplot(data = EqpU_new, aes(x = EqpU_new$tmpf_avg,y = EqpU_new$alti_avg)) + geom_point(aes(col = EqpU_new$firesYN), alpha = 0.1) + labs(x = "Average Hourly Temperature", y ="Average Hourly Humidity", col = "Wildfire Event") 
+
+
+
+```
+
+```{r}
+ggplot(data = FAT, aes(x = FAT$relh_avg, y=FAT$p01i_tot)) + geom_point(col = "navy", aplha = 0.2) + xlim(0,100)
+
+```
+
+
+```{r}
+EqpU = fireY_bind[which(fireY_bind$STAT_CAUSE_DESCR=="Arson"),]
+
+
+EqpU = rbind(EqpU[,list_col_no], fireN_bind)      
+
+EqpU_new <- na.omit(EqpU)
+col_name_EqpU <- colnames(EqpU)
+
+
+EqpU_new = data.frame(downSample(dt_ML_fire_YN,dt_ML_fire_YN$firesYN,list=TRUE,yname="firesYN")[1])
+colnames(EqpU_new)<-col_name_EqpU
+
+ggplot(data = EqpU_new, aes(x = EqpU_new$tmpf_avg,y = relh_avg)) + geom_point(aes(col = EqpU_new$firesYN), alpha = 0.1) + labs(x = "Average Hourly Temperature", y ="Average Hourly Humidity", col = "Wildfire Event") 
+ggplot(data = EqpU_new, aes(x = EqpU_new$tmpf_avg,y = EqpU_new$sped_avg)) + geom_point(aes(col = EqpU_new$firesYN), alpha = 0.1) + labs(x = "Average Hourly Temperature", y ="Average Hourly Humidity", col = "Wildfire Event") 
+ggplot(data = EqpU_new, aes(x = EqpU_new$tmpf_avg,y = EqpU_new$drct_avg)) + geom_point(aes(col = EqpU_new$firesYN), alpha = 0.1) + labs(x = "Average Hourly Temperature", y ="Average Hourly Humidity", col = "Wildfire Event") 
+ggplot(data = EqpU_new, aes(x = EqpU_new$tmpf_avg,y = log(EqpU_new$p01i_tot))) + geom_point(aes(col = EqpU_new$firesYN), alpha = 0.2) + labs(x = "Average Hourly Temperature", y ="Average Hourly Humidity", col = "Wildfire Event") 
+ggplot(data = EqpU_new, aes(x = EqpU_new$tmpf_avg,y = EqpU_new$alti_avg)) + geom_point(aes(col = EqpU_new$firesYN), alpha = 0.1) + labs(x = "Average Hourly Temperature", y ="Average Hourly Humidity", col = "Wildfire Event") 
+
+
+
+```
+
+```{r}
+EqpU = fireY_bind[which(fireY_bind$STAT_CAUSE_DESCR=="Lighting"),]
+
+
+EqpU = rbind(EqpU[,list_col_no], fireN_bind)      
+
+EqpU_new <- na.omit(EqpU)
+col_name_EqpU <- colnames(EqpU)
+
+
+EqpU_new = data.frame(downSample(dt_ML_fire_YN,dt_ML_fire_YN$firesYN,list=TRUE,yname="firesYN")[1])
+colnames(EqpU_new)<-col_name_EqpU
+
+ggplot(data = EqpU_new, aes(x = EqpU_new$tmpf_avg,y = relh_avg)) + geom_point(aes(col = EqpU_new$firesYN), alpha = 0.1) + labs(x = "Average Hourly Temperature", y ="Average Hourly Humidity", col = "Wildfire Event") 
+ggplot(data = EqpU_new, aes(x = EqpU_new$tmpf_avg,y = EqpU_new$sped_avg)) + geom_point(aes(col = EqpU_new$firesYN), alpha = 0.1) + labs(x = "Average Hourly Temperature", y ="Average Hourly Humidity", col = "Wildfire Event") 
+ggplot(data = EqpU_new, aes(x = EqpU_new$tmpf_avg,y = EqpU_new$drct_avg)) + geom_point(aes(col = EqpU_new$firesYN), alpha = 0.1) + labs(x = "Average Hourly Temperature", y ="Average Hourly Humidity", col = "Wildfire Event") 
+ggplot(data = EqpU_new, aes(x = EqpU_new$tmpf_avg,y = log(EqpU_new$p01i_tot))) + geom_point(aes(col = EqpU_new$firesYN), alpha = 0.2) + labs(x = "Average Hourly Temperature", y ="Average Hourly Humidity", col = "Wildfire Event") 
+ggplot(data = EqpU_new, aes(x = EqpU_new$tmpf_avg,y = EqpU_new$alti_avg)) + geom_point(aes(col = EqpU_new$firesYN), alpha = 0.1) + labs(x = "Average Hourly Temperature", y ="Average Hourly Humidity", col = "Wildfire Event") 
+
+
+
+```
+
+
+
+
+
+```{r}
+pairs(~relh_avg+sped_avg+alti_avg+drct_avg,data=EqpU)
+
+```
+
+
+
+
+```{r}
+library(AppliedPredictiveModeling)
+library(caret)
+library(e1071)
+library(earth)
+library(leaps)
+library(boot)
+library(kernlab)
+```
+
+
+
+
+
+
+```{r}
+
+
+dt_ML_fire_YN <- rbind(fireY_bind_clean,fireN_bind_clean)
+dt_ML_fire_YN <- na.omit(dt_ML_fire_YN)
+col_name <- colnames(dt_ML_fire_YN)
+```
+
+```{r}
+dt_ML_fire_YN_down = data.frame(downSample(dt_ML_fire_YN,dt_ML_fire_YN$firesYN,list=TRUE,yname="firesYN")[1])
+colnames(dt_ML_fire_YN_down)<-col_name
+```
+
+
+
+
+
+
+#on whole dataset 
+```{r}
+
+levels(dt_ML_fire_YN_down$firesYN) <- make.names(levels(factor(dt_ML_fire_YN_down$firesYN)))
+
+
+trainRows = sample(dim(dt_ML_fire_YN_down)[1],round(.8*dim(dt_ML_fire_YN_down)[1])) # fancy way to choose about 80% of the rows for test set
+dt_train = dt_ML_fire_YN_down[trainRows,]
+dt_test = dt_ML_fire_YN_down[-trainRows,]
+
+FitRows = sample(dim(dt_train)[1],round(.9*dim(dt_train)[1])) # fancy way to choose about 80% of the rows for test set
+dt_fit = dt_train[FitRows,]
+dt_val = dt_train[-FitRows,]
+```
+
+
+
+```{r}
+dt_fit_YN <- dt_fit
+dt_train_YN <- dt_train
+dt_test_YN <- dt_test
+dt_val_YN <- dt_val
+```
+
+```{r}
+library(pROC)
+
+```
+
+
+
+```{r}
+prob_naive = 0.5
+Co0_set = c(1,0)
+Prob = c(prob_naive, 1-prob_naive)
+#N_testing is number of points in testing set
+#pred_naive is a vector of predictions on test set
+pred_naive = sample(Co0_set,size = length(dt_val$firesYN),replace = TRUE,prob = Prob)
+pred_naive
+
+```
+```{r}
+dt_val_n <- dt_val_YN
+dt_val_n$firesYN <- as.numeric(dt_val_n$firesYN)-1
+confu_mat_naive <- table(prediction=pred_naive,actual=dt_val_n$firesYN)
+confu_mat_naive
+
+```
+
+
+
+#model 1 GLM with metric=ROC
+```{r}
+
+
+glmTuned = train(firesYN~tmpf_avg+dwpf_avg+relh_avg+sped_avg+p01i_tot+alti_avg+drct_avg, 
+                  data = dt_fit_YN, # use just the fitting data
+                  method = "glm", 
+                 trControl = trainControl(method="cv",number=5, savePredictions = TRUE, classProbs=TRUE,
+                  summaryFunction = twoClassSummary),
+                  metric="ROC"
+                  
+)
+
+
+```
+
+```{r}
+summary(glmTuned)
+```
+
+
+```{r}
+glmTuned
+```
+
+```{r}
+fit_glm.predictions = predict(glmTuned,dt_fit_YN)
+roc_obj_glm <- roc((dt_fit_YN$firesYN),(as.numeric(fit_glm.predictions)))
+roc_obj_glm
+plot(roc_obj_glm,  print.auc = TRUE,
+     auc.polygon = TRUE,
+     grid=c(0.1, 0.2),
+     grid.col = c("green", "red"),
+     max.auc.polygon = TRUE,
+     auc.polygon.col = "ivory",
+     print.thres = TRUE,
+     print.auc.x = 0.3,
+     print.auc.y = 0.2)
+```
+
+```{r}
+val_glm.predictions = predict(glmTuned,dt_val_YN)
+confusionMatrix(val_glm.predictions,dt_val_YN$firesYN)
+
+```
+
+
+```{r}
+```
+
+```{r}
+RFGrid = expand.grid(.degree=1:5,.nprune=2:10)
+RFTuned = train(firesYN~tmpf_avg+dwpf_avg+sped_avg+p01i_tot+alti_avg+drct_avg, 
+                  data = dt_fit_YN, # use just the fitting data
+                  method = "parRF",
+                 # tuneGrid = expand.grid(mtry = seq(4,16,4)), # pass it the grid of tuning parameters to try
+                  metric="ROC",
+                  trControl = trainControl(
+                  classProbs=TRUE,
+                  summaryFunction = twoClassSummary
+                  )
+)
+```
+
+```{r}
+fit_RF.predictions = predict(RFTuned,dt_fit_YN)
+roc_obj_RF <- roc((dt_fit_YN$firesYN),(as.numeric(fit_RF.predictions)))
+roc_obj_RF
+plot(roc_obj_RF,  print.auc = TRUE,
+     auc.polygon = TRUE,
+     grid=c(0.1, 0.2),
+     grid.col = c("green", "red"),
+     max.auc.polygon = TRUE,
+     auc.polygon.col = "ivory",
+     print.thres = TRUE,
+     print.auc.x = 0.3,
+     print.auc.y = 0.2)
+
+val_RF.predictions = predict(RFTuned,dt_val_YN)
+confu_mat_RF <- table(prediction=val_RF.predictions,actual=dt_val_YN$firesYN)
+confu_mat_RF
+```
+
+```{r}
+RFTuned
+```
+
+
+
+```{r}
+confusionMatrix(val_RF.predictions,dt_val_YN$firesYN)
+```
+
+
+
+
+```{r}
+
+marsGrid = expand.grid(.degree=1:5,.nprune=2:20)
+marsTuned = train(firesYN~tmpf_avg+dwpf_avg+relh_avg+sped_avg+p01i_tot+alti_avg+drct_avg, 
+                  data = dt_fit_YN, # use just the fitting data
+                  method = "earth", 
+                  tuneGrid = marsGrid, #data.frame(nvmax=1:20), # pass it the grid of tuning parameters to try
+                  metric="ROC",
+                  trControl = trainControl(
+                  classProbs=TRUE,
+                  summaryFunction = twoClassSummary
+      )
+)
+```
+
+
+```{r}
+marsTuned
+```
+
+```{r}
+summary(marsTuned)
+plot(varImp(marsTuned),main='Relative Importance of Variables in Polynomial Regression')
+plot(marsTuned)
+print(marsTuned)
+
+```
+
+
+```{r}
+fit_mars.predictions = predict(marsTuned,dt_fit_YN)
+roc_obj_glm <- roc((dt_fit_YN$firesYN),(as.numeric(fit_mars.predictions)))
+roc_obj_glm
+plot(roc_obj_glm,  print.auc = TRUE,
+     auc.polygon = TRUE,
+     grid=c(0.1, 0.2),
+     grid.col = c("green", "red"),
+     max.auc.polygon = TRUE,
+     auc.polygon.col = "ivory",
+     print.thres = TRUE,
+     print.auc.x = 0.3,
+     print.auc.y = 0.2)
+
+val_mars.predictions = predict(marsTuned,dt_val_YN)
+confu_mat_glm <- table(prediction=val_mars.predictions,actual=dt_val_YN$firesYN)
+confu_mat_glm
+```
+
+```{r}
+
+```
+
+
+
+```{r}
+confusionMatrix(val_mars.predictions,dt_val_YN$firesYN)
+```
+
+#SVM model
+```{r}
+
+
+svmFit <- train(firesYN~tmpf_avg+dwpf_avg+relh_avg+sped_avg+p01i_tot+alti_avg+drct_avg,
+                data = dt_fit_YN,
+                method = "svmRadial",
+                preProc = c("center", "scale"),
+                tuneLength = 10,
+               # trControl = trainControl()
+                metric="ROC",
+                trControl = trainControl(method = "repeatedcv", number = 10, repeats = 5,
+                  classProbs=TRUE,
+                  summaryFunction = twoClassSummary)
+)
+```
+
+```{r}
+svmFit
+```
+
+
+```{r}
+fit_svm.predictions = predict(svmFit,dt_fit_YN)
+roc_obj_glm <- roc((dt_fit_YN$firesYN),(as.numeric(fit_svm.predictions)))
+roc_obj_glm
+plot(roc_obj_glm,  print.auc = TRUE,
+     auc.polygon = TRUE,
+     grid=c(0.1, 0.2),
+     grid.col = c("green", "red"),
+     max.auc.polygon = TRUE,
+     auc.polygon.col = "ivory",
+     print.thres = TRUE,
+     print.auc.x = 0.3,
+     print.auc.y = 0.2)
+
+val_svm.predictions = predict(svmFit,dt_val_YN)
+confusionMatrix(val_svm.predictions,dt_val_YN$firesYN)
+
+```
+
+
+
+#ML Final dataset
+
+
+
+```{r}
+
+marsGrid = expand.grid(.degree=1:5,.nprune=2:10)
+marsTuned = train(firesYN~tmpf_avg+dwpf_avg+relh_avg+sped_avg+p01i_tot+alti_avg+drct_avg, 
+                  data = dt_train_YN, # use just the fitting data
+                  method = "earth", 
+                  tuneGrid = marsGrid, #data.frame(nvmax=1:20), # pass it the grid of tuning parameters to try
+                  metric="ROC",
+                  trControl = trainControl(
+                  classProbs=TRUE,
+                  summaryFunction = twoClassSummary
+      )
+)
+```
+
+```{r}
+summary(marsTuned)
+plot(varImp(marsTuned),main='Relative Importance of Variables in Polynomial Regression')
+plot(marsTuned)
+print(marsTuned)
+
+```
+
+
+```{r}
+train_mars.predictions = predict(marsTuned,dt_train_YN)
+roc_obj_glm <- roc((dt_train_YN$firesYN),(as.numeric(train_mars.predictions)))
+roc_obj_glm
+plot(roc_obj_glm,  print.auc = TRUE,
+     auc.polygon = TRUE,
+     grid=c(0.1, 0.2),
+     grid.col = c("green", "red"),
+     max.auc.polygon = TRUE,
+     auc.polygon.col = "ivory",
+     print.thres = TRUE,
+     print.auc.x = 0.3,
+     print.auc.y = 0.2)
+
+test_mars.predictions = predict(marsTuned,dt_test_YN)
+confusionMatrix(test_mars.predictions,dt_test_YN$firesYN)
+
+
+```
+
+
+```{r}
+
+dt_with_predict <- dt_test_YN
+dt_with_predict$predict <- test_mars.predictions
+```
+
+
+
+```{r}
+dt_with_predict
+```
+
+
+```{r}
+dt_for_plot_predict <- merge(pre_merge_dt_use_100k, dt_with_predict, by.x = "OBJECTID", by.y = "OBJECTID")
+```
+
+```{r}
+dt_for_plot_predict$TF[which(dt_for_plot_predict$firesYN==dt_for_plot_predict$predict)] <- "Correct"
+dt_for_plot_predict$TF[which(dt_for_plot_predict$firesYN!=dt_for_plot_predict$predict)] <- "False"
+
+```
+
+```{r}
+dt_for_plot_predict$TF[which(dt_for_plot_predict$FIRE_SIZE_CLASS=="G")]
+```
+
+
+```{r}
+ggplot(data = dt_for_plot_predict, aes(dt_for_plot_predict$FIRE_SIZE_CLASS)) + geom_bar(aes(fill = TF), alpha = 0.5, col = "black", position = "fill") + labs(x = "Fire Size Class")
+ggplot(data = dt_for_plot_predict, aes(dt_for_plot_predict$STAT_CAUSE_DESCR)) + geom_bar(aes(fill = TF), alpha = 0.5, col = "black", position = "fill") + labs(x = "Fire Cause")+theme(axis.text.x=element_text(angle=90,hjust=1,vjust=0.5))
+
+```
+
+
+
+
+```{r}
+dt_correct <- dt_for_plot_predict[which(dt_for_plot_predict$TF=="Correct"),]
+leaflet(network_FG) %>%
+  addTiles() %>% 
+  addCircleMarkers(
+    lat = dt_correct$LATITUDE, 
+    lng = dt_correct$LONGITUDE, 
+    radius = 5, 
+    color = "red", 
+    stroke = FALSE, 
+    fillOpacity = 0.1
+  ) %>% 
+  addCircleMarkers(
+    lat = network_FG$lat, 
+    lng = network_FG$lon, 
+    radius = 4, 
+    color = "navy", 
+    label = ~paste(stid, " - ", station_name),  
+    stroke = FALSE, 
+    fillOpacity = 0.8
+  ) 
+```
+
+
+
+
+
+
+
+
+
+
+
+###################################
+#PDA for RAL
+
+
+```{r}
+
+
+dt_ML_fire_YN_sub_L <- rbind(fireY_bind_clean[which(fireY_bind$Weatherstation=="RAL"),],fireN_bind_clean[which(fireN_bind$Weatherstation=="RAL"),])
+dt_ML_fire_YN_sub_L <- na.omit(dt_ML_fire_YN_sub_L)
+col_name <- colnames(dt_ML_fire_YN_sub_L)
+```
+
+```{r}
+dt_ML_fire_YN_sub_L
+```
+
+
+```{r}
+dt_ML_fire_YN_down_sub_L = data.frame(downSample(dt_ML_fire_YN_sub_L,dt_ML_fire_YN_sub_L$firesYN,list=TRUE,yname="firesYN")[1])
+colnames(dt_ML_fire_YN_down_sub_L)<-col_name
+```
+
+```{r}
+
+levels(dt_ML_fire_YN_down_sub_L$firesYN) <- make.names(levels(factor(dt_ML_fire_YN_down_sub_L$firesYN)))
+
+
+trainRows = sample(dim(dt_ML_fire_YN_down_sub_L)[1],round(.8*dim(dt_ML_fire_YN_down_sub_L)[1])) # fancy way to choose about 80% of the rows for test set
+dt_train_L = dt_ML_fire_YN_down_sub_L[trainRows,]
+dt_test_L = dt_ML_fire_YN_down_sub_L[-trainRows,]
+
+```
+
+
+
+```{r}
+dt_train_YN_L <- dt_train_L
+dt_test_YN_L <- dt_test_L
+```
+
+#MARS 
+
+```{r, message = FALSE}
+
+marsGrid = expand.grid(.degree=1:5,.nprune=2:20)
+marsTuned_L = train(firesYN~tmpf_avg+dwpf_avg+relh_avg+sped_avg+p01i_tot+alti_avg+drct_avg, 
+                  data = dt_train_YN_L, # use just the fitting data
+                  method = "earth", 
+                  tuneGrid = marsGrid, #data.frame(nvmax=1:20), # pass it the grid of tuning parameters to try
+                  metric="ROC",
+                  trControl = trainControl(
+                  classProbs=TRUE,
+                  summaryFunction = twoClassSummary
+      )
+)
+```
+
+```{r}
+summary(marsTuned_L)
+plot(varImp(marsTuned_L),main='Relative Importance of Variables in Polynomial Regression')
+plot(marsTuned_L)
+print(marsTuned_L)
+
+```
+```{r}
+dt_test_YN_L
+```
+
+
+```{r}
+train_mars_L.predictions = predict(marsTuned_L,dt_train_YN_L)
+
+test_mars_L.predictions = predict(marsTuned_L,dt_test_YN_L)
+confusionMatrix(test_mars_L.predictions,dt_test_YN_L$firesYN)
+
+
+```
+
+
+#MARS FAT
+
+
+```{r}
+
+dt_ML_fire_YN_sub_EQU <- rbind(fireY_bind_clean[which(fireY_bind$Weatherstation=="FAT"),],fireN_bind_clean[which(fireN_bind$Weatherstation=="FAT"),])
+
+dt_ML_fire_YN_sub_EQU <- na.omit(dt_ML_fire_YN_sub_EQU)
+col_name <- colnames(dt_ML_fire_YN_sub_EQU)
+```
+
+```{r}
+fireY_bind_clean[which(fireY_bind$Weatherstation=="FAT"),]
+dt_ML_fire_YN_sub_EQU
+```
+
+
+
+```{r}
+dt_ML_fire_YN_down_sub_EQU = data.frame(downSample(dt_ML_fire_YN_sub_EQU,dt_ML_fire_YN_sub_EQU$firesYN,list=TRUE,yname="firesYN")[1])
+colnames(dt_ML_fire_YN_down_sub_EQU)<-col_name
+```
+
+```{r}
+
+levels(dt_ML_fire_YN_down_sub_EQU$firesYN) <- make.names(levels(factor(dt_ML_fire_YN_down_sub_EQU$firesYN)))
+
+
+trainRows = sample(dim(dt_ML_fire_YN_down_sub_EQU)[1],round(.8*dim(dt_ML_fire_YN_down_sub_EQU)[1])) # fancy way to choose about 80% of the rows for test set
+dt_train_EQU = dt_ML_fire_YN_down_sub_EQU[trainRows,]
+dt_test_EQU = dt_ML_fire_YN_down_sub_EQU[-trainRows,]
+
+```
+
+```{r}
+dt_ML_fire_YN_down_sub_EQU
+```
+
+
+
+```{r}
+dt_train_YN_EQU <- dt_train_EQU
+dt_test_YN_EQU <- dt_test_EQU
+```
+
+
+```{r, message = FALSE}
+
+marsGrid = expand.grid(.degree=1:3,.nprune=2:10)
+marsTuned_EQU = train(firesYN~tmpf_avg+dwpf_avg+relh_avg+sped_avg+p01i_tot+alti_avg+drct_avg, 
+                  data = dt_train_YN_EQU, # use just the fitting data
+                  method = "earth", 
+                  tuneGrid = marsGrid, #data.frame(nvmax=1:20), # pass it the grid of tuning parameters to try
+                  metric="ROC",
+                  trControl = trainControl(
+                  classProbs=TRUE,
+                  summaryFunction = twoClassSummary
+      )
+)
+```
+
+```{r}
+dt_train_YN_EQU
+```
+
+
+```{r}
+summary(marsTuned_EQU)
+plot(varImp(marsTuned_EQU),main='Relative Importance of Variables in Polynomial Regression')
+plot(marsTuned_EQU)
+print(marsTuned_EQU)
+
+```
+
+```{r}
+train_mars_EQU.predictions = predict(marsTuned_EQU,dt_train_YN_EQU)
+
+test_mars_EQU.predictions = predict(marsTuned_EQU,dt_test_YN_EQU)
+confusionMatrix(test_mars_EQU.predictions,dt_test_YN_EQU$firesYN)
+
+
+```
+
+
+
+
+
+
+
+
+
+#MARS UKI
+
+```{r}
+dt_ML_fire_YN_sub_A <- rbind(fireY_bind_clean[which(fireY_bind$Weatherstation=="UKI"),],fireN_bind_clean[which(fireN_bind$Weatherstation=="UKI"),])
+
+
+dt_ML_fire_YN_sub_A <- na.omit(dt_ML_fire_YN_sub_A)
+col_name <- colnames(dt_ML_fire_YN_sub_A)
+```
+
+```{r}
+dt_ML_fire_YN_down_sub_A = data.frame(downSample(dt_ML_fire_YN_sub_A,dt_ML_fire_YN_sub_A$firesYN,list=TRUE,yname="firesYN")[1])
+colnames(dt_ML_fire_YN_down_sub_A)<-col_name
+```
+
+```{r}
+
+levels(dt_ML_fire_YN_down_sub_A$firesYN) <- make.names(levels(factor(dt_ML_fire_YN_down_sub_A$firesYN)))
+
+
+trainRows = sample(dim(dt_ML_fire_YN_down_sub_A)[1],round(.8*dim(dt_ML_fire_YN_down_sub_A)[1])) # fancy way to choose about 80% of the rows for test set
+dt_train_A = dt_ML_fire_YN_down_sub_A[trainRows,]
+dt_test_A = dt_ML_fire_YN_down_sub_A[-trainRows,]
+
+```
+
+```{r}
+dt_train_A
+```
+
+
+
+```{r}
+dt_train_YN_A <- dt_train_A
+dt_test_YN_A <- dt_test_A
+```
+
+
+```{r, message = FALSE}
+
+marsGrid = expand.grid(.degree=1:5,.nprune=2:10)
+marsTuned_A = train(firesYN~tmpf_avg+dwpf_avg+relh_avg+sped_avg+p01i_tot+alti_avg+drct_avg, 
+                  data = dt_train_YN_A, # use just the fitting data
+                  method = "earth", 
+                  tuneGrid = marsGrid, #data.frame(nvmax=1:20), # pass it the grid of tuning parameters to try
+                  metric="ROC",
+                  trControl = trainControl(
+                  classProbs=TRUE,
+                  summaryFunction = twoClassSummary
+      )
+)
+```
+
+```{r}
+summary(marsTuned_A)
+plot(varImp(marsTuned_A),main='Relative Importance of Variables in Polynomial Regression')
+plot(marsTuned_A)
+print(marsTuned_A)
+
+```
+
+```{r}
+train_mars_A.predictions = predict(marsTuned_A,dt_train_YN_A)
+
+test_mars_A.predictions = predict(marsTuned_A,dt_test_YN_A)
+confusionMatrix(test_mars_A.predictions,dt_test_YN_A$firesYN)
+
+
+```
+
+```{r}
+ggplot(data = fireY_bind_Arson, aes(alti_avg)) + geom_density()
+```
+
+
+
+
+
+
+
